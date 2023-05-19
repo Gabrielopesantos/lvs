@@ -1,0 +1,13 @@
+# Ignore object files and executables
+obj/
+bin/
+
+# Ignore other build artifacts
+*.o
+*.a
+*.so
+*.dll
+
+# Editors
+.vscode
+.idea
