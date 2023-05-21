@@ -1,6 +1,7 @@
 # Ignore object files and executables
 obj/
 bin/
+src/main
 
 # Ignore other build artifacts
 *.o
