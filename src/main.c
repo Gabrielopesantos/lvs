@@ -31,8 +31,7 @@ int he_listen(void) {
     server_addr.sin_port = htons(8080);
 
     // Bind the socket to the server address
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ==
-        -1) {
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
@@ -111,11 +110,42 @@ int main(int argc, char *argv[]) {
     struct worker *workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
-    for (int i = 0; i < NUM_WORKERS; i++) {
-        printf(
-            "Worker pid: %d\nWorker ipc_sock_fd: %d\nWorker available: % d\n ",
-            workers[i].pid, workers[i].ipc_sock, workers[i].available);
+    // NOTE: Send message
+    // Set up the file descriptors to send
+    int fd_to_send1 = 18; // FIXME: Going to fail because this fd doesn't exit
+
+    // Prepare the message header
+    struct msghdr message;
+    memset(&message, 0, sizeof(struct msghdr));
+
+    // Prepare the control message structure
+    char control_buffer[CMSG_SPACE(sizeof(int))]; // Allocate space for one file descriptor
+    memset(control_buffer, 0, sizeof(control_buffer));
+
+    // Set the control message in the message header
+    message.msg_control = control_buffer;
+    message.msg_controllen = sizeof(control_buffer);
+
+    struct cmsghdr *control_message = CMSG_FIRSTHDR(&message);
+    control_message->cmsg_len = CMSG_LEN(sizeof(int)); // Length of control message structure
+    control_message->cmsg_level = SOL_SOCKET;          // Socket-level control message
+    control_message->cmsg_type = SCM_RIGHTS;           // Specify the control message type
+
+    // Attach the file descriptors to the control message
+    int *fd_ptr = (int *)CMSG_DATA(control_message);
+    fd_ptr[0] = fd_to_send1; // First file descriptor
+
+    if (sendmsg(workers[0].ipc_sock, &message, 0) == -1) {
+        perror("send");
     }
+
+    // for (int i = 0; i < NUM_WORKERS; i++) {
+    //     printf(
+    //         "Worker pid: %d\nWorker ipc_sock_fd: %d\nWorker available: %
+    //         d\n
+    //         ", workers[i].pid, workers[i].ipc_sock,
+    //         workers[i].available);
+    // }
 
     exit(0);
 }
