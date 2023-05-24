@@ -50,102 +50,90 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // char *port = argv[2];
-    // int sockfd = he_listen();
-    //
-    // // Accept connections and reply
-    // if (listen(sockfd, 5) == -1) {
-    //     perror("listen");
-    //     exit(EXIT_FAILURE);
-    // }
-    //
-    // fprintf(stdout, "Server listening for connections...\n");
-    //
-    // struct sockaddr_in client_addr;
-    // socklen_t client_len;
-    // int newsockfd;
-    // while (1) {
-    //     // Accept new connection
-    //     client_len = sizeof(client_addr);
-    //
-    //     newsockfd =
-    //         accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
-    //     if (newsockfd == -1) {
-    //         perror("accept");
-    //         continue;
-    //     }
-    //
-    //     fprintf(stdout, "New client connection accepted.\n");
-    //
-    //     // Handle the new connection (send/receive data)
-    //     // NOTE: For now we just want to send back exactly what we receive
-    //     char msg_buf[BUFFER_SIZE];
-    //     ssize_t msg_size;
-    //     msg_size = recv(newsockfd, &msg_buf, BUFFER_SIZE, 0);
-    //     if (msg_size == -1) {
-    //         perror("recv");
-    //         close(newsockfd);
-    //         continue;
-    //     }
-    //
-    //     fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf,
-    //             msg_size);
-    //
-    //     // Write back
-    //     if (send(newsockfd, &msg_buf, msg_size, 0) == -1) {
-    //         perror("send");
-    //         close(newsockfd);
-    //         continue;
-    //     }
-    //
-    //     fprintf(stdout, "Message sent back to the client.\n");
-    //
-    //     close(newsockfd);
-    // }
-    //
-    // // Close the socket (Isn't closed not available anymore in sockets.h?)
-    // close(sockfd);
-
     // NOTE: static?
     struct worker *workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
-    // NOTE: Send message
-    // Set up the file descriptors to send
-    int fd_to_send1 = 18; // FIXME: Going to fail because this fd doesn't exit
+    char *port = argv[2];
+    int sockfd = he_listen();
 
-    // Prepare the message header
-    struct msghdr message;
-    memset(&message, 0, sizeof(struct msghdr));
+    // Accept connections and reply
+    if (listen(sockfd, 5) == -1) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    fprintf(stdout, "Server listening for connections...\n");
 
-    // Prepare the control message structure
-    char control_buffer[CMSG_SPACE(sizeof(int))]; // Allocate space for one file descriptor
-    memset(control_buffer, 0, sizeof(control_buffer));
+    struct sockaddr_in client_addr;
+    socklen_t client_len;
+    int newsockfd;
+    while (1) {
+        // Accept new connection
+        client_len = sizeof(client_addr);
 
-    // Set the control message in the message header
-    message.msg_control = control_buffer;
-    message.msg_controllen = sizeof(control_buffer);
+        newsockfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+        if (newsockfd == -1) {
+            perror("accept");
+            continue;
+        }
 
-    struct cmsghdr *control_message = CMSG_FIRSTHDR(&message);
-    control_message->cmsg_len = CMSG_LEN(sizeof(int)); // Length of control message structure
-    control_message->cmsg_level = SOL_SOCKET;          // Socket-level control message
-    control_message->cmsg_type = SCM_RIGHTS;           // Specify the control message type
+        fprintf(stdout, "New client connection accepted.\n");
+        //
+        // Prepare the message header
+        struct msghdr message;
+        memset(&message, 0, sizeof(struct msghdr));
 
-    // Attach the file descriptors to the control message
-    int *fd_ptr = (int *)CMSG_DATA(control_message);
-    fd_ptr[0] = fd_to_send1; // First file descriptor
+        // Prepare the control message structure
+        char control_buffer[CMSG_SPACE(sizeof(int))]; // Allocate space for one file descriptor
+        memset(control_buffer, 0, sizeof(control_buffer));
 
-    if (sendmsg(workers[0].ipc_sock, &message, 0) == -1) {
-        perror("send");
+        // Set the control message in the message header
+        message.msg_control = control_buffer;
+        message.msg_controllen = sizeof(control_buffer);
+
+        struct cmsghdr *control_message = CMSG_FIRSTHDR(&message);
+        control_message->cmsg_len = CMSG_LEN(sizeof(int)); // Length of control message structure
+        control_message->cmsg_type = SCM_RIGHTS;           // Specify the control message type
+        control_message->cmsg_level = SOL_SOCKET;          // Socket-level control message
+
+        // Attach the file descriptor to the control message
+        int *fd_ptr = (int *)CMSG_DATA(control_message);
+        fd_ptr[0] = newsockfd;
+
+        printf("About to send message with conn fd %d to socket fd %d\n", newsockfd,
+               workers[0].ipc_sock);
+        if (sendmsg(workers[0].ipc_sock, &message, 0) == -1) {
+            perror("send");
+        }
+        printf("Message sent!\n");
+
+        // Handle the new connection (send/receive data)
+        // NOTE: For now we just want to send back exactly what we receive
+        // char msg_buf[BUFFER_SIZE];
+        // ssize_t msg_size;
+        // msg_size = recv(newsockfd, &msg_buf, BUFFER_SIZE, 0);
+        // if (msg_size == -1) {
+        //     perror("recv");
+        //     close(newsockfd);
+        //     continue;
+        // }
+        //
+        // fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf, msg_size);
+        //
+        // // Write back
+        // if (send(newsockfd, &msg_buf, msg_size, 0) == -1) {
+        //     perror("send");
+        //     close(newsockfd);
+        //     continue;
+        // }
+        //
+        // fprintf(stdout, "Message sent back to the client.\n");
+
+        // close(newsockfd); // NOTE: I don't close this socket, right?
     }
 
-    // for (int i = 0; i < NUM_WORKERS; i++) {
-    //     printf(
-    //         "Worker pid: %d\nWorker ipc_sock_fd: %d\nWorker available: %
-    //         d\n
-    //         ", workers[i].pid, workers[i].ipc_sock,
-    //         workers[i].available);
-    // }
+    // Close the socket (Isn't closed not available anymore in sockets.h?)
+    close(sockfd);
 
     exit(0);
 }
