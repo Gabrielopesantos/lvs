@@ -1,5 +1,7 @@
 #include "worker.h"
+#include "ipc.h"
 #include "main.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +19,8 @@ void spawn_workers(struct worker *workers) {
 }
 
 int new_worker(struct worker *w) {
-    int pid, ipc_sock_pair[2];
+    pid_t pid;
+    int ipc_sock_pair[2];
     // NOTE: What's the automated way of chosing the PROTOCOL?
     if (socketpair(AF_LOCAL, SOCK_STREAM, 0, ipc_sock_pair) == -1) {
         return 1;
@@ -47,22 +50,9 @@ void worker_loop(int recv_sockfd) {
     printf("recv socket fd %d\n", recv_sockfd);
 
     while (1) {
-        // Prepare the parent message header for receiving
-        struct msghdr message;
-        memset(&message, 0, sizeof(struct msghdr));
-
-        // Prepare the control message structure
-        char recv_control_buffer[CMSG_SPACE(sizeof(int))];
-        memset(recv_control_buffer, 0, sizeof(recv_control_buffer));
-
-        // Set the control buffer in the receive message header
-        message.msg_control = recv_control_buffer;
-        message.msg_controllen = sizeof(recv_control_buffer);
-
-        printf("Child process waiting for message\n");
-        if (recvmsg(recv_sockfd, &message, 0) == -1) {
-            perror("recvmsg");
-            break; // FIXME: Remove this break
+        int conn_sockfd;
+        if (receive_fd(recv_sockfd, &conn_sockfd) == -1) {
+            fprintf(stdout, "ERROR: Failed to read fd from socket: %s", strerror(errno));
         }
         printf("Message received!\n");
         // break; // FIXME: Remove this break
