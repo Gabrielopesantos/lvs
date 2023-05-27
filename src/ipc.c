@@ -9,7 +9,7 @@ int send_fd(int socket, int fd) {
     memset(&msg, 0, sizeof(struct msghdr));
 
     // Prepare the control message structure
-    char cbuffer[CMSG_SPACE(sizeof(int))]; // Allocate space for one file descriptor
+    char cbuffer[CMSG_SPACE(sizeof(int))];
     memset(cbuffer, 0, sizeof(cbuffer));
 
     // Set the control message in the message header
@@ -25,7 +25,13 @@ int send_fd(int socket, int fd) {
     *((int *)CMSG_DATA(cmsg)) = fd;
 
     printf("About to send message with conn fd %d to socket fd %d\n", fd, socket);
-    return sendmsg(socket, &msg, 0);
+    int ret = sendmsg(socket, &msg, 0);
+    if (ret == -1) {
+        perror("sendmsg");
+        return -1;
+    }
+
+    return 0;
 }
 
 int receive_fd(int socket, int *fd) {
@@ -41,11 +47,17 @@ int receive_fd(int socket, int *fd) {
     msg.msg_control = recv_cbuffer;
     msg.msg_controllen = sizeof(recv_cbuffer);
 
-    printf("Child process waiting for message\n");
     if (recvmsg(socket, &msg, 0) == -1) {
         perror("recvmsg"); // NOTE: Is this needed if we use strerror on the caller?
         return -1;
     }
 
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    if (cmsg == NULL) {
+        fprintf(stderr, "ERROR: No control message received\n");
+        return -1;
+    }
+
+    *fd = *((int *)CMSG_DATA(cmsg));
     return 0;
 }

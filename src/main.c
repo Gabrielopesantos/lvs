@@ -80,33 +80,13 @@ int main(int argc, char *argv[]) {
 
         fprintf(stdout, "New client connection accepted.\n");
 
-        if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
-            perror("sendmsg");
-        }
-
-        // Handle the new connection (send/receive data)
-        // NOTE: For now we just want to send back exactly what we receive
-        // char msg_buf[BUFFER_SIZE];
-        // ssize_t msg_size;
-        // msg_size = recv(newsockfd, &msg_buf, BUFFER_SIZE, 0);
-        // if (msg_size == -1) {
-        //     perror("recv");
-        //     close(newsockfd);
-        //     continue;
+        // NOTE: Commented while we can't get IPC between sender and consumer processes to work
+        // if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
+        //     fprintf(stderr, "ERROR: Failed to send connection socket fd\n");
+        //     continue; // NOTE: continue?
         // }
-        //
-        // fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf, msg_size);
 
-        // Write back
-        // if (send(newsockfd, &msg_buf, msg_size, 0) == -1) {
-        //     perror("send");
-        //     close(newsockfd);
-        //     continue;
-        // }
-        //
-        // fprintf(stdout, "Message sent back to the client.\n");
-        //
-        // close(newsockfd); // NOTE: I don't close this socket, right?
+        handle_conn(conn_sockfd);
     }
 
     // Close the socket (Isn't closed not available anymore in sockets.h?)
