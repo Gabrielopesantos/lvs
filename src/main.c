@@ -1,6 +1,7 @@
 #include "main.h"
 #include "ipc.h"
 #include "worker.h"
+#include <errno.h>
 #include <memory.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -32,7 +33,8 @@ int he_listen(void) {
     server_addr.sin_port = htons(8080);
 
     // Bind the socket to the server address
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ==
+        -1) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
@@ -72,7 +74,8 @@ int main(int argc, char *argv[]) {
         // Accept new connection
         client_len = sizeof(client_addr);
 
-        conn_sockfd = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+        conn_sockfd =
+            accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
         if (conn_sockfd == -1) {
             perror("accept");
             continue;
@@ -80,13 +83,15 @@ int main(int argc, char *argv[]) {
 
         fprintf(stdout, "New client connection accepted.\n");
 
-        // NOTE: Commented while we can't get IPC between sender and consumer processes to work
-        // if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
-        //     fprintf(stderr, "ERROR: Failed to send connection socket fd\n");
-        //     continue; // NOTE: continue?
-        // }
+        // NOTE: Commented while we can't get IPC between sender and consumer
+        // processes to work
+        if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
+            fprintf(stderr, "ERROR: Failed to send connection socket: %s\n",
+                    strerror(errno));
+            continue; // NOTE: continue?
+        }
 
-        handle_conn(conn_sockfd);
+        // handle_conn(conn_sockfd);
     }
 
     // Close the socket (Isn't closed not available anymore in sockets.h?)

@@ -2,59 +2,58 @@
 #include <memory.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <sys/socket.h>
 
 int send_fd(int socket, int fd) {
-    // Prepare the message header
-    struct msghdr msg;
-    memset(&msg, 0, sizeof(struct msghdr));
+    struct iovec iov[1];
+    char dummy;
+    iov[0].iov_base = &dummy;
+    iov[0].iov_len = 1;
 
-    // Prepare the control message structure
-    char cbuffer[CMSG_SPACE(sizeof(int))];
-    memset(cbuffer, 0, sizeof(cbuffer));
+    struct msghdr msg = {0};
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
 
-    // Set the control message in the message header
-    msg.msg_control = cbuffer;
-    msg.msg_controllen = sizeof(cbuffer);
+    char buf[CMSG_SPACE(sizeof(int))];
+    msg.msg_control = buf;
+    msg.msg_controllen = sizeof(buf);
 
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int)); // Length of control message structure
-    cmsg->cmsg_type = SCM_RIGHTS;           // Specify the control message type
-    cmsg->cmsg_level = SOL_SOCKET;          // Socket-level control message
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
 
-    // Attach the file descriptor to the control message
     *((int *)CMSG_DATA(cmsg)) = fd;
 
-    printf("About to send message with conn fd %d to socket fd %d\n", fd, socket);
-    int ret = sendmsg(socket, &msg, 0);
-    if (ret == -1) {
-        perror("sendmsg");
-        return -1;
-    }
-
-    return 0;
+    return sendmsg(socket, &msg, 0);
 }
 
 int receive_fd(int socket, int *fd) {
-    // Prepare the parent message header for receiving
-    struct msghdr msg;
-    memset(&msg, 0, sizeof(struct msghdr));
+    // NOTE: iovec doesn't seem to be needed in receiver
+    struct iovec iov[1];
+    char dummy;
+    iov[0].iov_base = &dummy;
+    iov[0].iov_len = 1;
 
-    // Prepare the control message structure
-    char recv_cbuffer[CMSG_SPACE(sizeof(int))];
-    memset(recv_cbuffer, 0, sizeof(recv_cbuffer));
+    struct msghdr msg = {0};
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
 
-    // Set the control buffer in the receive message header
-    msg.msg_control = recv_cbuffer;
-    msg.msg_controllen = sizeof(recv_cbuffer);
+    char buf[CMSG_SPACE(sizeof(int))];
+    msg.msg_control = buf;
+    msg.msg_controllen = sizeof(buf);
 
-    if (recvmsg(socket, &msg, 0) == -1) {
-        perror("recvmsg"); // NOTE: Is this needed if we use strerror on the caller?
+    if (recvmsg(socket, &msg, 0) < 0) {
+        perror("recvmsg");
         return -1;
     }
 
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    if (cmsg == NULL) {
-        fprintf(stderr, "ERROR: No control message received\n");
+    if (cmsg == NULL || cmsg->cmsg_len != CMSG_LEN(sizeof(int))) {
+        return -1;
+    }
+
+    if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
         return -1;
     }
 

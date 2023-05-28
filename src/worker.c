@@ -1,7 +1,6 @@
 #include "worker.h"
 #include "ipc.h"
 #include "main.h"
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +24,6 @@ int new_worker(struct worker *w) {
     if (socketpair(AF_LOCAL, SOCK_STREAM, 0, ipc_sock_pair) == -1) {
         return 1;
     }
-    printf("Socket fd's generated: %d, %d\n", ipc_sock_pair[0], ipc_sock_pair[1]);
 
     pid = fork();
     if (pid == 0) {
@@ -52,7 +50,7 @@ void worker_loop(int recv_sockfd) {
     while (1) {
         int conn_sockfd;
         if (receive_fd(recv_sockfd, &conn_sockfd) == -1) {
-            fprintf(stderr, "ERROR: Failed to read fd from socket: %s\n", strerror(errno));
+            fprintf(stderr, "ERROR: Failed to read fd from socket");
         } else {
             printf("===================\n");
             printf("Message received, connection socket fd: %d\n", conn_sockfd);
@@ -76,7 +74,8 @@ void handle_conn(int conn_sockfd) {
         close(conn_sockfd);
     }
 
-    fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf, msg_size);
+    fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf,
+            msg_size);
 
     // Write back
     if (send(conn_sockfd, &msg_buf, msg_size, 0) == -1) {
