@@ -1,10 +1,11 @@
-#include "main.h"
 #include "ipc.h"
+#include "server.h"
 #include "worker.h"
 #include <errno.h>
 #include <memory.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,9 +40,29 @@ int he_listen(void) {
         exit(EXIT_FAILURE);
     }
 
-    fprintf(stdout, "Socket created and bound successfully.\n");
-
     return sockfd;
+}
+
+void trap_signal(int sig, void (*sig_handler)(int)) {
+    struct sigaction sa;
+
+    sigemptyset(&sa.sa_mask);
+
+    sa.sa_handler = sig_handler;
+    sa.sa_flags = 0;
+#ifdef SA_RESTART
+    sa.sa_flags |= SA_RESTART;
+#endif
+
+    if (sigaction(sig, &sa, NULL) < 0) {
+        perror("sigaction");
+        exit(1);
+    }
+}
+
+void sigint_handler(int s) {
+    printf("Terminating...\n");
+    gracefully_shutdown(NUM_WORKERS, workers);
 }
 
 int main(int argc, char *argv[]) {
@@ -50,18 +71,20 @@ int main(int argc, char *argv[]) {
                 "ERROR: Expected bind port wasn't provided. Usage: "
                 "%s --listen {port}.\n",
                 argv[0]);
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
-    // NOTE: static?
-    struct worker *workers = calloc(NUM_WORKERS, sizeof(struct worker));
+    workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
     char *port = argv[2];
-    int sockfd = he_listen();
+    inet_sock_fd = he_listen();
+
+    // Handle signals
+    trap_signal(SIGINT, sigint_handler);
 
     // Accept connections and reply
-    if (listen(sockfd, 5) == -1) {
+    if (listen(inet_sock_fd, 5) == -1) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
@@ -75,7 +98,7 @@ int main(int argc, char *argv[]) {
         client_len = sizeof(client_addr);
 
         conn_sockfd =
-            accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+            accept(inet_sock_fd, (struct sockaddr *)&client_addr, &client_len);
         if (conn_sockfd == -1) {
             perror("accept");
             continue;
@@ -96,8 +119,8 @@ int main(int argc, char *argv[]) {
         close(conn_sockfd);
     }
 
-    // Close the socket (Isn't closed not available anymore in sockets.h?)
-    close(sockfd);
+    // Close internet listening socket
+    close(inet_sock_fd);
 
     exit(0);
 }

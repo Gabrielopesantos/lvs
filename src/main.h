@@ -1,2 +1,0 @@
-#define BUFFER_SIZE 1024
-#define NUM_WORKERS 1

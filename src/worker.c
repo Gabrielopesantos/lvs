@@ -1,6 +1,6 @@
 #include "worker.h"
 #include "ipc.h"
-#include "main.h"
+#include "server.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +31,7 @@ int new_worker(struct worker *w) {
         close(ipc_sock_pair[0]);
         worker_loop(ipc_sock_pair[1]);
     } else if (pid > 0) {
-        printf("Child process forked with pid: %d\n", pid);
+        printf("Worker process spawned. PID: %d\n", pid);
         close(ipc_sock_pair[1]);
         // Parent process
         w->pid = pid;
@@ -45,7 +45,7 @@ int new_worker(struct worker *w) {
 }
 
 void worker_loop(int recv_sockfd) {
-    printf("recv socket fd %d\n", recv_sockfd);
+    // printf("recv socket fd %d\n", recv_sockfd);
 
     while (1) {
         int conn_sockfd;
@@ -63,6 +63,7 @@ void worker_loop(int recv_sockfd) {
         // break; // FIXME: Remove this break
     }
 
+    fprintf(stdout, "Closing worker processing\n");
     exit(0); // NOTE: Exiting exec for now;
 }
 

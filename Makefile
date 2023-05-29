@@ -1,6 +1,7 @@
 # Compiler and flags
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -pedantic -g
+# Using C11 with GNU Extensions for `struct sigaction`
+CFLAGS = -std=gnu11 -g3 -Wall -Wextra -pedantic -O2 -g
 
 # Directories
 SRC_DIR = src
