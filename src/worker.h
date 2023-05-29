@@ -10,4 +10,4 @@ struct worker {
 void spawn_workers(struct worker *workers);
 int new_worker(struct worker *w);
 void worker_loop(int ipc_sock_fd);
-void handle_conn(int conn_sockfd);
+int handle_conn(int conn_sockfd);

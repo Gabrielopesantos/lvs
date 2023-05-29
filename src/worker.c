@@ -50,20 +50,23 @@ void worker_loop(int recv_sockfd) {
     while (1) {
         int conn_sockfd;
         if (receive_fd(recv_sockfd, &conn_sockfd) == -1) {
-            fprintf(stderr, "ERROR: Failed to read fd from socket");
+            fprintf(stderr, "ERROR: Failed to read fd from socket\n");
+            // continue;
         } else {
             printf("===================\n");
             printf("Message received, connection socket fd: %d\n", conn_sockfd);
             printf("===================\n");
-            close(conn_sockfd);
+            if (handle_conn(conn_sockfd) == 1) {
+                fprintf(stderr, "ERROR: failed to handle connection\n");
+            }
         }
-        break; // FIXME: Remove this break
+        // break; // FIXME: Remove this break
     }
 
     exit(0); // NOTE: Exiting exec for now;
 }
 
-void handle_conn(int conn_sockfd) {
+int handle_conn(int conn_sockfd) {
     // Handle the new connection (send/receive data)
     // NOTE: For now we just want to send back exactly what we receive
     char msg_buf[BUFFER_SIZE];
@@ -72,8 +75,8 @@ void handle_conn(int conn_sockfd) {
     if (msg_size == -1) {
         perror("recv");
         close(conn_sockfd);
+        return 1;
     }
-
     fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf,
             msg_size);
 
@@ -81,9 +84,10 @@ void handle_conn(int conn_sockfd) {
     if (send(conn_sockfd, &msg_buf, msg_size, 0) == -1) {
         perror("send");
         close(conn_sockfd);
+        return 1;
     }
-
     fprintf(stdout, "Message sent back to the client.\n");
 
     close(conn_sockfd);
+    return 0;
 }

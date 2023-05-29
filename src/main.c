@@ -91,7 +91,9 @@ int main(int argc, char *argv[]) {
             continue; // NOTE: continue?
         }
 
-        // handle_conn(conn_sockfd);
+        // NOTE: Is this process also supposed to close the connection socket?
+        // Validate.
+        close(conn_sockfd);
     }
 
     // Close the socket (Isn't closed not available anymore in sockets.h?)
