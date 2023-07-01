@@ -62,7 +62,19 @@ void trap_signal(int sig, void (*sig_handler)(int)) {
 
 void sigint_handler(int s) {
     printf("Terminating...\n");
+
+    // Terminate worker processes
     gracefully_shutdown(NUM_WORKERS, workers);
+
+    // Close internet listening socket
+    if (close(inet_sock_fd) == -1) {
+        perror("close");
+    } else {
+        // TMP
+        fprintf(stdout, "Socket %d closed\n", inet_sock_fd);
+    }
+
+    exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char *argv[]) {
@@ -77,6 +89,8 @@ int main(int argc, char *argv[]) {
     workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
+    // FIXME: There are cases where the bind fails and workers have already been
+    // spawned
     char *port = argv[2];
     inet_sock_fd = he_listen();
 
@@ -122,5 +136,5 @@ int main(int argc, char *argv[]) {
     // Close internet listening socket
     close(inet_sock_fd);
 
-    exit(0);
+    exit(EXIT_SUCCESS);
 }

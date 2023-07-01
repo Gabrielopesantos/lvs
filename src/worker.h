@@ -1,6 +1,3 @@
-#include <stdint.h>
-#include <stdio.h>
-
 struct worker {
     int pid;
     int ipc_sock;

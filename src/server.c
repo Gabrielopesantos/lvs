@@ -3,7 +3,6 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-// #include <sys/select.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -20,9 +19,4 @@ void gracefully_shutdown(int n_workers, struct worker *workers) {
 
     // Free allocated memory for workers
     free(workers);
-
-    // Close internet connection socket
-    close(inet_sock_fd);
-
-    exit(EXIT_SUCCESS);
 }

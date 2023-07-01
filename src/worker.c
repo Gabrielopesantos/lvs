@@ -50,12 +50,13 @@ void worker_loop(int recv_sockfd) {
     while (1) {
         int conn_sockfd;
         if (receive_fd(recv_sockfd, &conn_sockfd) == -1) {
-            fprintf(stderr, "ERROR: Failed to read fd from socket\n");
-            // continue;
+            fprintf(stderr,
+                    "ERROR: Failed to read file descriptor from socket\n");
+            // FIXME: It might mean that the parent process wasn't successfully
+            // initialized. For now terminate the worker when this happens.
+            exit(EXIT_FAILURE);
         } else {
-            printf("===================\n");
             printf("Message received, connection socket fd: %d\n", conn_sockfd);
-            printf("===================\n");
             if (handle_conn(conn_sockfd) == 1) {
                 fprintf(stderr, "ERROR: failed to handle connection\n");
             }
@@ -64,7 +65,7 @@ void worker_loop(int recv_sockfd) {
     }
 
     fprintf(stdout, "Closing worker processing\n");
-    exit(0); // NOTE: Exiting exec for now;
+    exit(EXIT_SUCCESS); // NOTE: Exiting exec for now;
 }
 
 int handle_conn(int conn_sockfd) {
@@ -78,7 +79,7 @@ int handle_conn(int conn_sockfd) {
         close(conn_sockfd);
         return 1;
     }
-    fprintf(stdout, "Received the message '%s' with size %zd\n", msg_buf,
+    fprintf(stdout, "Received the message\n%s\nwith size %zd\n", msg_buf,
             msg_size);
 
     // Write back
