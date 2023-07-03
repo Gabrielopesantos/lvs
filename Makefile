@@ -26,7 +26,7 @@ EXEC_PARAMS := --listen 3030
 # Default target
 all: $(EXECUTABLE)
 
-# Rule to build the executable
+# Rule to build the execute // NOTE: Address this targetable
 $(EXECUTABLE): $(OBJ_FILES)
 	$(CC) $(CFLAGS) $^ -o $@
 

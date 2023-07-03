@@ -1,5 +1,4 @@
 #include "ipc.h"
-#include "server.h"
 #include "worker.h"
 #include <errno.h>
 #include <memory.h>
@@ -12,6 +11,14 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#define BUFFER_SIZE 1024
+#define NUM_WORKERS 1
+
+void gracefully_shutdown(int n_workers, struct worker *workers);
+
+struct worker *workers;
+int inet_sock_fd;
 
 // NOTE: Rename function once I understand what exactly is happening here
 // How do I want to handle *possible* errors, let fail the program? Yes, for
@@ -137,4 +144,19 @@ int main(int argc, char *argv[]) {
     close(inet_sock_fd);
 
     exit(EXIT_SUCCESS);
+}
+
+void gracefully_shutdown(int n_workers, struct worker *workers) {
+    // Terminate workers
+    for (int i = 0; i < 1; i++) {
+        if (workers[i].available == 1) {
+            if (kill(workers[i].pid, SIGINT) == 0) {
+                printf("Worker with PID %d successfully terminated\n",
+                       workers[i].pid);
+            }
+        }
+    }
+
+    // Free allocated memory for workers
+    free(workers);
 }
