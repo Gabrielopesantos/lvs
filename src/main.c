@@ -1,3 +1,4 @@
+#include "main.h"
 #include "ipc.h"
 #include "worker.h"
 #include <errno.h>
@@ -11,9 +12,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#define BUFFER_SIZE 1024
-#define NUM_WORKERS 1
 
 void gracefully_shutdown(int n_workers, struct worker *workers);
 
