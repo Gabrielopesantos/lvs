@@ -1,4 +1,5 @@
 #include "worker.h"
+#include "http_parser.h"
 #include "ipc.h"
 #include "main.h"
 #include <stdio.h>
@@ -47,6 +48,11 @@ int new_worker(struct worker *w) {
 void worker_loop(int recv_sockfd) {
     // printf("recv socket fd %d\n", recv_sockfd);
 
+    // NOTE: What if this was moved to the struct?
+    // FIXME: Handle malloc failure
+    http_parser *parser = malloc(sizeof(http_parser));
+    http_parser_init(parser, HTTP_REQUEST);
+
     while (1) {
         int conn_sockfd;
         if (receive_fd(recv_sockfd, &conn_sockfd) == -1) {
@@ -57,7 +63,7 @@ void worker_loop(int recv_sockfd) {
             exit(EXIT_FAILURE);
         } else {
             printf("Message received, connection socket fd: %d\n", conn_sockfd);
-            if (handle_conn(conn_sockfd) == 1) {
+            if (handle_conn(conn_sockfd, parser) == 1) {
                 fprintf(stderr, "ERROR: failed to handle connection\n");
             }
         }
@@ -68,7 +74,13 @@ void worker_loop(int recv_sockfd) {
     exit(EXIT_SUCCESS); // NOTE: Exiting exec for now;
 }
 
-int handle_conn(int conn_sockfd) {
+// Callback when a URL is found in the request
+int on_url_cb(http_parser *parser, const char *at, size_t length) {
+    printf("URL found: %.*s\n", (int)length, at);
+    return 0;
+}
+
+int handle_conn(int conn_sockfd, http_parser *parser) {
     // Handle the new connection (send/receive data)
     // NOTE: For now we just want to send back exactly what we receive
     char msg_buf[BUFFER_SIZE];
@@ -81,6 +93,19 @@ int handle_conn(int conn_sockfd) {
     }
     fprintf(stdout, "Received the message\n%s\nwith size %zd\n", msg_buf,
             msg_size);
+
+    // FIXME: Think where to put this settings
+    http_parser_settings settings = {0};
+    // memset(&settings, 0, sizeof(settings)); // Initialize settings to zero
+    settings.on_url = on_url_cb;
+
+    size_t parsed =
+        http_parser_execute(parser, &settings, msg_buf, strlen(msg_buf));
+
+    if (parsed != strlen(msg_buf)) {
+        printf("Failed to parse request: %s\n",
+               http_errno_description(HTTP_PARSER_ERRNO(parser)));
+    }
 
     // Write back
     if (send(conn_sockfd, &msg_buf, msg_size, 0) == -1) {
