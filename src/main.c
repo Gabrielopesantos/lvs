@@ -13,15 +13,16 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-void gracefully_shutdown(int n_workers, struct worker *workers);
+void gracefully_shutdown_worker_processes(int n_workers,
+                                          struct worker *workers);
 
 struct worker *workers;
-int inet_sock_fd;
+int inet_sockfd;
 
 // NOTE: Rename function once I understand what exactly is happening here
 // How do I want to handle *possible* errors, let fail the program? Yes, for
 // now.
-int he_listen(void) {
+int he_listen() {
     int sockfd;
     struct sockaddr_in server_addr;
 
@@ -66,17 +67,16 @@ void trap_signal(int sig, void (*sig_handler)(int)) {
 }
 
 void sigint_handler(int s) {
-    printf("Terminating...\n");
+    printf("Terminating process...\n");
 
-    // Terminate worker processes
-    gracefully_shutdown(NUM_WORKERS, workers);
+    // Run graceful shutdown on workers(kill worker processes, free worker)
+    gracefully_shutdown_worker_processes(NUM_WORKERS, workers);
 
     // Close internet listening socket
-    if (close(inet_sock_fd) == -1) {
+    if (close(inet_sockfd) == -1) {
         perror("close");
     } else {
-        // TMP
-        fprintf(stdout, "Socket %d closed\n", inet_sock_fd);
+        fprintf(stdout, "inet socket %d closed\n", inet_sockfd);
     }
 
     exit(EXIT_SUCCESS);
@@ -94,16 +94,14 @@ int main(int argc, char *argv[]) {
     workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
-    // FIXME: There are cases where the bind fails and workers have already been
-    // spawned
     char *port = argv[2];
-    inet_sock_fd = he_listen();
+    inet_sockfd = he_listen();
 
     // Handle signals
     trap_signal(SIGINT, sigint_handler);
 
     // Accept connections and reply
-    if (listen(inet_sock_fd, 5) == -1) {
+    if (listen(inet_sockfd, 5) == -1) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
@@ -117,7 +115,7 @@ int main(int argc, char *argv[]) {
         client_len = sizeof(client_addr);
 
         conn_sockfd =
-            accept(inet_sock_fd, (struct sockaddr *)&client_addr, &client_len);
+            accept(inet_sockfd, (struct sockaddr *)&client_addr, &client_len);
         if (conn_sockfd == -1) {
             perror("accept");
             continue;
@@ -125,26 +123,20 @@ int main(int argc, char *argv[]) {
 
         fprintf(stdout, "New client connection accepted.\n");
 
-        // NOTE: Commented while we can't get IPC between sender and consumer
-        // processes to work
         if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
             fprintf(stderr, "ERROR: Failed to send connection socket: %s\n",
                     strerror(errno));
-            continue; // NOTE: continue?
+            continue; // FIXME: continue?
         }
-
-        // NOTE: Is this process also supposed to close the connection socket?
-        // Validate.
-        close(conn_sockfd);
     }
 
     // Close internet listening socket
-    close(inet_sock_fd);
-
-    exit(EXIT_SUCCESS);
+    close(inet_sockfd);
+    exit(EXIT_FAILURE);
 }
 
-void gracefully_shutdown(int n_workers, struct worker *workers) {
+void gracefully_shutdown_worker_processes(int n_workers,
+                                          struct worker *workers) {
     // Terminate workers
     for (int i = 0; i < 1; i++) {
         if (workers[i].available == 1) {
