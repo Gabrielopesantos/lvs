@@ -1,12 +1,15 @@
+#ifndef WORKER_H
+#define WORKER_H
+
 #include "http_parser.h"
+#include <unistd.h>
 
 struct worker {
-    int pid;
+    pid_t pid;
     int ipc_sock;
     int available;
 };
 
 void spawn_workers(struct worker *workers);
-int new_worker(struct worker *w);
-void worker_loop(int ipc_sock_fd);
-int handle_conn(int conn_sockfd, http_parser *parser);
+
+#endif // WORKER_H
