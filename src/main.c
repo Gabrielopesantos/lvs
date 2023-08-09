@@ -131,6 +131,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Close internet listening socket
+    shutdown(inet_sockfd, SHUT_RDWR);
     close(inet_sockfd);
     exit(EXIT_FAILURE);
 }

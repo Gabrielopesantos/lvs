@@ -121,9 +121,9 @@ int handle_connection(int conn_sockfd, http_parser *parser) {
         free_connection(conn);
     }
 
-    printf("Closing connection socket\n");
-    close(conn_sockfd);
     free_connection(conn);
+    shutdown(conn_sockfd, SHUT_RDWR);
+    close(conn_sockfd);
     return 0;
 }
 
