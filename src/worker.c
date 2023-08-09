@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #define MAX_URL_SIZE 256
+#define MAX_RESPONSE_SIZE 4096
 
 struct connection {
     int fd;
@@ -101,7 +102,65 @@ int read_request(http_parser *parser, struct connection *conn) {
     return 0;
 }
 
-int send_response(struct connection *conn) { return 0; }
+int write_response(struct connection *conn, int status_code,
+                   char *optional_body) {
+    int resp_len;
+    char *status_line, *response;
+
+    switch (status_code) {
+    case 400:
+        status_line = "HTTP/1.1 400 Bad Request\r\n";
+        break;
+    case 404:
+        status_line = "HTTP/1.1 404 Not Found\r\n";
+        break;
+    case 500:
+        status_line = "HTTP/1.1 500 Internal Server Error\r\n";
+        break;
+    default:
+        fprintf(stderr, "ERROR: Invalid status code provided\n");
+        return -1;
+    }
+
+    response = calloc(MAX_RESPONSE_SIZE, sizeof(char));
+    if (response == NULL) {
+        fprintf(stderr, "ERROR: Failed to allocate memory for response\n");
+        return -1;
+    }
+
+    if (optional_body != NULL) {
+        char *content_len_header = "Content-Length: ";
+        int content_len = strlen(optional_body);
+        sprintf(response, "%s%s%d\r\n\r\n%s", status_line, content_len_header,
+                content_len, optional_body);
+    } else {
+        strcpy(response, status_line);
+    }
+
+    resp_len = strlen(response);
+
+    ssize_t send_res = send(conn->fd, response, resp_len, 0);
+    free(response);
+    if (send_res == -1) {
+        perror("send");
+        return -1;
+    }
+
+    return 0;
+}
+
+int send_response(struct connection *conn) {
+    if (conn->url == NULL) {
+        fprintf(stderr, "ERROR: Cannot send response. URL not set.\n");
+        return -1;
+    }
+
+    if (write_response(conn, 500, "Something went wrong.") == -1) {
+        return -1;
+    }
+
+    return 0;
+}
 
 // Handle the new connection (send/receive data)
 // NOTE: For now we just want to send back exactly what we receive

@@ -72,6 +72,7 @@ void sigint_handler(int s) {
     // Run graceful shutdown on workers(kill worker processes, free worker)
     gracefully_shutdown_worker_processes(NUM_WORKERS, workers);
 
+    shutdown(inet_sockfd, SHUT_RDWR);
     // Close internet listening socket
     if (close(inet_sockfd) == -1) {
         perror("close");
