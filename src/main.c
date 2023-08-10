@@ -13,37 +13,52 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-void gracefully_shutdown_worker_processes(int n_workers,
-                                          struct worker *workers);
-
 struct worker *workers;
 int inet_sockfd;
 
-// NOTE: Rename function once I understand what exactly is happening here
-// How do I want to handle *possible* errors, let fail the program? Yes, for
-// now.
-int he_listen() {
+void shutdown_and_close_internet_socket() {
+    // Gracefully shutdown TCP connection by sending FIN
+    if (shutdown(inet_sockfd, SHUT_RDWR) == -1) {
+        log_error("Failed to shutdown internet socket: %s", strerror(errno));
+    }
+
+    // Close internet listening socket
+    if (close(inet_sockfd) == -1) {
+        log_error("Failed to close internet socket: %s", strerror(errno));
+    }
+}
+
+void gracefully_shutdown_worker_processes(int n_workers,
+                                          struct worker *workers);
+
+int socket_listen(uint16_t port) {
     int sockfd;
     struct sockaddr_in server_addr;
 
     // Create a socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
-        perror("socket");
-        exit(EXIT_FAILURE);
+        log_error("Could not create socket: %s", strerror(errno));
+        return -1;
     }
 
     // Set up the server address
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(8080);
+    server_addr.sin_port = htons(port);
 
     // Bind the socket to the server address
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ==
         -1) {
-        perror("bind");
-        exit(EXIT_FAILURE);
+        log_error("Could not bind socket: %s", strerror(errno));
+        return -1;
+    }
+
+    // Listen on the socket
+    if (listen(sockfd, 5) == -1) {
+        log_error("Could not listen on socket: %s", strerror(errno));
+        return -1;
     }
 
     return sockfd;
@@ -67,28 +82,18 @@ void trap_signal(int sig, void (*sig_handler)(int)) {
 }
 
 void sigint_handler(int s) {
-    printf("Terminating process...\n");
-
-    // Run graceful shutdown on workers(kill worker processes, free worker)
+    log_info("Terminating process...");
     gracefully_shutdown_worker_processes(NUM_WORKERS, workers);
-
-    shutdown(inet_sockfd, SHUT_RDWR);
-    // Close internet listening socket
-    if (close(inet_sockfd) == -1) {
-        perror("close");
-    } else {
-        fprintf(stdout, "inet socket %d closed\n", inet_sockfd);
-    }
+    shutdown_and_close_internet_socket();
 
     exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr,
-                "ERROR: Expected bind port wasn't provided. Usage: "
-                "%s --listen {port}.\n",
-                argv[0]);
+        log_error("Expected bind port wasn't provided. Usage: "
+                  "%s --listen {port}.",
+                  argv[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -96,17 +101,16 @@ int main(int argc, char *argv[]) {
     spawn_workers(workers);
 
     char *port = argv[2];
-    inet_sockfd = he_listen();
+    inet_sockfd = socket_listen((uint16_t)atoi(port));
+    if (inet_sockfd == -1) {
+        log_error("Failed to setup listening internet socket.");
+        goto exit_failure_close;
+    }
 
-    // Handle signals
+    // Setup SIGINT handler to gracefully shutdown server
     trap_signal(SIGINT, sigint_handler);
 
-    // Accept connections and reply
-    if (listen(inet_sockfd, 5) == -1) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-    printf("Server listening for connections...\n");
+    log_info("Server listening for connections...");
 
     struct sockaddr_in client_addr;
     socklen_t client_len;
@@ -114,26 +118,26 @@ int main(int argc, char *argv[]) {
     while (1) {
         // Accept new connection
         client_len = sizeof(client_addr);
-
         conn_sockfd =
             accept(inet_sockfd, (struct sockaddr *)&client_addr, &client_len);
         if (conn_sockfd == -1) {
-            perror("accept");
+            log_warn("Failed to accept new connection: %s", strerror(errno));
             continue;
         }
 
-        fprintf(stdout, "New client connection accepted.\n");
+        log_info("New client connection accepted");
 
+        // Send connection socket to worker
         if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
-            fprintf(stderr, "ERROR: Failed to send connection socket: %s\n",
-                    strerror(errno));
-            continue; // FIXME: continue?
+            log_error("Failed to send connection socket: %s", strerror(errno));
+            continue;
         }
     }
 
-    // Close internet listening socket
     shutdown(inet_sockfd, SHUT_RDWR);
     close(inet_sockfd);
+exit_failure_close:
+    gracefully_shutdown_worker_processes(NUM_WORKERS, workers);
     exit(EXIT_FAILURE);
 }
 
@@ -143,12 +147,40 @@ void gracefully_shutdown_worker_processes(int n_workers,
     for (int i = 0; i < 1; i++) {
         if (workers[i].available == 1) {
             if (kill(workers[i].pid, SIGINT) == 0) {
-                printf("Worker with PID %d successfully terminated\n",
-                       workers[i].pid);
+                log_info("Worker with PID %d successfully terminated",
+                         workers[i].pid);
             }
         }
     }
 
     // Free allocated memory for workers
     free(workers);
+}
+
+// FIXME: Move from `main`
+void log_error(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    fprintf(stderr, "ERROR: ");
+    vfprintf(stderr, format, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+}
+
+void log_info(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    fprintf(stdout, "INFO: ");
+    vfprintf(stdout, format, args);
+    fprintf(stdout, "\n");
+    va_end(args);
+}
+
+void log_warn(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    fprintf(stderr, "WARN: ");
+    vfprintf(stderr, format, args);
+    fprintf(stderr, "\n");
+    va_end(args);
 }

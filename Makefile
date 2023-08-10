@@ -19,7 +19,7 @@ OBJ_FILES = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES))
 EXECUTABLE = $(BIN_DIR)/$(BINARY_NAME)
 
 # Exec parameters
-EXEC_PARAMS := --listen 3030
+EXEC_PARAMS := --listen 8080
 
 .PHONY: all clean run
 
