@@ -13,6 +13,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#define DEFAULT_PORT "8080"
+#define DEFAULT_SERVE_DIRECTORY "."
+
 struct worker *workers;
 int inet_sockfd;
 
@@ -90,9 +93,36 @@ void sigint_handler(int s) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
+    char *port, *directory;
+    switch (argc) {
+    case 1:
+        port = DEFAULT_PORT;
+        directory = DEFAULT_SERVE_DIRECTORY;
+        break;
+    case 3:
+        port = argv[2];
+        directory = DEFAULT_SERVE_DIRECTORY;
+        break;
+    case 5:
+        port = argv[2];
+        directory = argv[4];
+        break;
+    default:
+        if (argc < 5) {
+            log_error("Invalid number of arguments provided. Usage: "
+                      "%s --listen {port} --directory {current_dir}.",
+                      argv[0]);
+        } else {
+            log_error("Too many arguments provided. Usage: "
+                      "%s --listen {port} --directory {current_dir}.",
+                      argv[0]);
+        }
+        exit(EXIT_FAILURE);
+        break;
+    }
+    if (argc == 0) {
         log_error("Expected bind port wasn't provided. Usage: "
-                  "%s --listen {port}.",
+                  "%s --listen {port} --directory {current_dir}.",
                   argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -100,7 +130,6 @@ int main(int argc, char *argv[]) {
     workers = calloc(NUM_WORKERS, sizeof(struct worker));
     spawn_workers(workers);
 
-    char *port = argv[2];
     inet_sockfd = socket_listen((uint16_t)atoi(port));
     if (inet_sockfd == -1) {
         log_error("Failed to setup listening internet socket.");
