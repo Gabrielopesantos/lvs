@@ -13,7 +13,7 @@
 
 #define MAX_URL_SIZE 256
 #define MAX_FILE_PATH 512
-#define MAX_RESPONSE_SIZE 4096
+#define MAX_RESPONSE_SIZE 12288
 
 enum FileType { REG, DIR, UNK };
 
@@ -64,6 +64,7 @@ void free_connection(struct connection *conn) {
     free(conn);
 }
 
+// FIXME: What is this?
 // Callback when a URL is found in the request
 int on_status_cb(http_parser *parser, const char *at, size_t len) {
     // struct connection *conn = parser->data;
@@ -77,7 +78,6 @@ int on_status_cb(http_parser *parser, const char *at, size_t len) {
 //
 int on_url_cb(http_parser *parser, const char *url, size_t url_len) {
     struct connection *conn = parser->data;
-    printf("URL found: %.*s\n", (int)url_len, url); // FIXME: remove
     memcpy(conn->url, url, url_len);
 
     return 0;
@@ -98,8 +98,8 @@ int read_request(http_parser *parser, struct connection *conn) {
         perror("recv");
         return -1;
     }
-    fprintf(stdout, "Received the message\n'%s'\nwith size %zd\n", conn->buf,
-            msg_size);
+    // fprintf(stdout, "Received the message\n'%s'\nwith size %zd\n", conn->buf,
+    //         msg_size);
 
     // FIXME: Think where to put these settings
     http_parser_settings settings = {0};
@@ -123,7 +123,7 @@ int write_response(struct connection *conn, int status_code,
     char *status_line, *response;
     switch (status_code) {
     case 200:
-        status_line = "HTTP/1.1 400 Ok\r\n";
+        status_line = "HTTP/1.1 200 Ok\r\n";
         break;
     case 400:
         status_line = "HTTP/1.1 400 Bad Request\r\n";
@@ -144,15 +144,17 @@ int write_response(struct connection *conn, int status_code,
 
     response = calloc(MAX_RESPONSE_SIZE, sizeof(char));
     if (response == NULL) {
-        fprintf(stderr, "ERROR: Failed to allocate memory for response\n");
+        log_error("Failed to allocate memory for response");
         return -1;
     }
 
     if (optional_body != NULL) {
+        char *connection_close_header = "Connection: close\r\n";
         char *content_len_header = "Content-Length: ";
         int content_len = strlen(optional_body);
-        sprintf(response, "%s%s%d\r\n\r\n%s", status_line, content_len_header,
-                content_len, optional_body);
+        sprintf(response, "%s%s%s%d\r\n\r\n%s", status_line,
+                connection_close_header, content_len_header, content_len,
+                optional_body);
     } else {
         strcpy(response, status_line);
     }
@@ -170,17 +172,18 @@ int write_response(struct connection *conn, int status_code,
     return 0;
 }
 
-int determine_request_file(char *path, enum FileType *file_type) {
-    struct stat path_stat;
+int determine_request_file_type(char *path, enum FileType *file_type) {
     *file_type = UNK;
+
+    struct stat path_stat;
     int exist = stat(path, &path_stat);
     if (exist == 0) {
         log_info("Path %s exists", path);
     } else {
         // FIXME: missing != permissions
-        log_error("Path %s doesn't exist or there was some error validating "
-                  "its existance: %s",
-                  path, strerror(errno));
+        log_warn("Path %s doesn't exist or there was some error validating "
+                 "its existance: %s",
+                 path, strerror(errno));
         return -1;
     }
 
@@ -200,24 +203,46 @@ int send_response(struct connection *conn) {
     }
 
     char file_path[MAX_FILE_PATH];
-    // Write serve_directory so it is available here
+    // FIXME: Wire serve_directory so it is available here
     snprintf(file_path, MAX_FILE_PATH, "%s%s", ".", conn->url);
-
     enum FileType file_type;
-    if (determine_request_file(file_path, &file_type) == -1) {
+    if (determine_request_file_type(file_path, &file_type) == -1) {
         return -1;
     }
 
     switch (file_type) {
     case (REG):
-        if (write_response(conn, 200, "File found") == -1) {
+        FILE *f = fopen(file_path, "r");
+        if (f == NULL) {
+            write_response(conn, 500, "Could not read file");
+            return -1;
+        }
+
+        struct stat f_stat;
+        if (stat(file_path, &f_stat) == -1) {
+            write_response(conn, 500, "Could not get file stats");
+            log_error("Could not get file stats: %s", strerror(errno));
+            fclose(f);
+            return -1;
+        }
+        off_t file_size = f_stat.st_size;
+        log_info("file_size: %zd", file_size);
+
+        // FIXME: Handle error
+        char *file_content = calloc(file_size + 1, sizeof(char));
+        ssize_t bytes_read;
+        bytes_read = fread(file_content, sizeof(char), file_size, f);
+        fclose(f);
+        log_info("bytes_read: %zd", bytes_read);
+
+        if (write_response(conn, 200, file_content) == -1) {
             return -1;
         }
         break;
     case (DIR):
         if (write_response(conn, 501,
-                           "Requested feature has not been implemented") ==
-            -1) {
+                           "Listing a directory feature has not been "
+                           "implemented yet") == -1) {
             return -1;
         }
         break;
@@ -240,15 +265,14 @@ int handle_connection(int conn_sockfd, http_parser *parser) {
     parser->data = conn;
 
     if (read_request(parser, conn) < 0) {
-        close(conn_sockfd);
-        free_connection(conn);
+        goto close_connection;
     }
 
     if (send_response(conn) < 0) {
-        close(conn_sockfd);
-        free_connection(conn);
+        goto close_connection;
     }
 
+close_connection:
     free_connection(conn);
     shutdown(conn_sockfd, SHUT_RDWR);
     close(conn_sockfd);
