@@ -118,51 +118,78 @@ int read_request(http_parser *parser, struct connection *conn) {
 }
 
 int write_response(struct connection *conn, int status_code,
-                   char *optional_body) {
-    int resp_len;
+                   const char *additional_header[], char *body) {
+    int response_size = 0, additional_header_size = 0;
     char *status_line, *response;
     switch (status_code) {
     case 200:
-        status_line = "HTTP/1.1 200 Ok\r\n";
+        status_line = "HTTP/1.1 200 Ok";
         break;
     case 400:
-        status_line = "HTTP/1.1 400 Bad Request\r\n";
+        status_line = "HTTP/1.1 400 Bad Request";
         break;
     case 404:
-        status_line = "HTTP/1.1 404 Not Found\r\n";
+        status_line = "HTTP/1.1 404 Not Found";
         break;
     case 500:
-        status_line = "HTTP/1.1 500 Internal Server Error\r\n";
+        status_line = "HTTP/1.1 500 Internal Server Error";
         break;
     case 501:
-        status_line = "HTTP/1.1 501 Not Implemented\r\n";
+        status_line = "HTTP/1.1 501 Not Implemented";
         break;
     default:
-        fprintf(stderr, "ERROR: Invalid status code provided\n");
+        log_error("Invalid status code provided");
         return -1;
     }
 
-    response = calloc(MAX_RESPONSE_SIZE, sizeof(char));
+    response_size += strlen(status_line) + 2;
+    // Check if additional headers and body have been provided
+    for (int i = 0; additional_header[i] != NULL; i++) {
+        additional_header_size += strlen(additional_header[i]) + 2;
+    }
+    response_size += additional_header_size;
+
+    // Allocate 50 bytes to store the content length header
+    char buffer[50];
+    char *content_len_header = buffer; // Pointer to buffer
+    if (body != NULL) {
+        int content_len = strlen(body);
+        response_size += content_len;
+
+        sprintf(content_len_header, "Content-Length: %d\r\n", content_len);
+        response_size += strlen(content_len_header) + 2;
+    }
+    response_size += 2;
+
+    log_info("Response size: %d", response_size);
+    response = calloc(response_size, sizeof(char));
     if (response == NULL) {
         log_error("Failed to allocate memory for response");
         return -1;
     }
 
-    if (optional_body != NULL) {
-        char *connection_close_header = "Connection: close\r\n";
-        char *content_len_header = "Content-Length: ";
-        int content_len = strlen(optional_body);
-        sprintf(response, "%s%s%s%d\r\n\r\n%s", status_line,
-                connection_close_header, content_len_header, content_len,
-                optional_body);
+    if (body == NULL && additional_header == NULL) {
+        sprintf(response, "%s\r\n", status_line);
     } else {
-        strcpy(response, status_line);
+        // char *connection_close_header = "Connection: close\r\n";
+        sprintf(response, "%s\r\n", status_line);
+
+        for (int i = 0; additional_header[i] != NULL; i++) {
+            log_info("header: %s", additional_header[i]);
+            strcat(response, additional_header[i]);
+            strcat(response, "\r\n");
+        }
+
+        if (body != NULL) {
+            strcat(response, content_len_header);
+            strcat(response, "\r\n");
+            strcat(response, "\r\n");
+            strcat(response, body);
+        }
     }
 
-    resp_len = strlen(response);
-
     // FIXME: In a while loop? while (bytes_sent > 0)
-    ssize_t bytes_sent = send(conn->fd, response, resp_len, 0);
+    ssize_t bytes_sent = send(conn->fd, response, response_size, 0);
     free(response);
     if (bytes_sent == -1) {
         perror("could not send response");
@@ -214,40 +241,41 @@ int send_response(struct connection *conn) {
     case (REG):
         FILE *f = fopen(file_path, "r");
         if (f == NULL) {
-            write_response(conn, 500, "Could not read file");
+            write_response(conn, 500, NULL, "Could not read file");
             return -1;
         }
 
         struct stat f_stat;
         if (stat(file_path, &f_stat) == -1) {
-            write_response(conn, 500, "Could not get file stats");
+            write_response(conn, 500, NULL, "Could not get file stats");
             log_error("Could not get file stats: %s", strerror(errno));
             fclose(f);
             return -1;
         }
         off_t file_size = f_stat.st_size;
-        log_info("file_size: %zd", file_size);
+        // log_info("file_size: %zd", file_size);
 
         // FIXME: Handle error
         char *file_content = calloc(file_size + 1, sizeof(char));
         ssize_t bytes_read;
         bytes_read = fread(file_content, sizeof(char), file_size, f);
         fclose(f);
-        log_info("bytes_read: %zd", bytes_read);
 
-        if (write_response(conn, 200, file_content) == -1) {
+        static const char *additional_header[] = {"Content-Type: text/simple",
+                                                  NULL};
+        if (write_response(conn, 200, additional_header, file_content) == -1) {
             return -1;
         }
         break;
     case (DIR):
-        if (write_response(conn, 501,
+        if (write_response(conn, 501, NULL,
                            "Listing a directory feature has not been "
                            "implemented yet") == -1) {
             return -1;
         }
         break;
     default:
-        if (write_response(conn, 404, NULL) == -1) {
+        if (write_response(conn, 404, NULL, NULL) == -1) {
             return -1;
         }
         break;
