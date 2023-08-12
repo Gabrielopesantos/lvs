@@ -2,15 +2,20 @@
 #include "http_parser.h"
 #include "ipc.h"
 #include "main.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #define MAX_URL_SIZE 256
+#define MAX_FILE_PATH 512
 #define MAX_RESPONSE_SIZE 4096
+
+enum FileType { REG, DIR, UNK };
 
 struct connection {
     int fd;
@@ -60,6 +65,16 @@ void free_connection(struct connection *conn) {
 }
 
 // Callback when a URL is found in the request
+int on_status_cb(http_parser *parser, const char *at, size_t len) {
+    // struct connection *conn = parser->data;
+    printf("Status found: %.*s\n", (int)len, at); // FIXME: remove
+    // memcpy(conn->url, url, url_len);
+
+    return 0;
+}
+
+// Callback when a URL is found in the request
+//
 int on_url_cb(http_parser *parser, const char *url, size_t url_len) {
     struct connection *conn = parser->data;
     printf("URL found: %.*s\n", (int)url_len, url); // FIXME: remove
@@ -67,6 +82,7 @@ int on_url_cb(http_parser *parser, const char *url, size_t url_len) {
 
     return 0;
 }
+
 int on_message_complete_cb(http_parser *parser) {
     struct connection *conn = parser->data;
     conn->completed = 1;
@@ -88,10 +104,9 @@ int read_request(http_parser *parser, struct connection *conn) {
     // FIXME: Think where to put these settings
     http_parser_settings settings = {0};
     // memset(&settings, 0, sizeof(settings));
+    settings.on_status = on_status_cb;
     settings.on_url = on_url_cb;
     settings.on_message_complete = on_message_complete_cb;
-
-    printf("Before parsing request\n");
 
     size_t parsed = http_parser_execute(parser, &settings, conn->buf, msg_size);
     if (parsed != msg_size) {
@@ -106,8 +121,10 @@ int write_response(struct connection *conn, int status_code,
                    char *optional_body) {
     int resp_len;
     char *status_line, *response;
-
     switch (status_code) {
+    case 200:
+        status_line = "HTTP/1.1 400 Ok\r\n";
+        break;
     case 400:
         status_line = "HTTP/1.1 400 Bad Request\r\n";
         break;
@@ -116,6 +133,9 @@ int write_response(struct connection *conn, int status_code,
         break;
     case 500:
         status_line = "HTTP/1.1 500 Internal Server Error\r\n";
+        break;
+    case 501:
+        status_line = "HTTP/1.1 501 Not Implemented\r\n";
         break;
     default:
         fprintf(stderr, "ERROR: Invalid status code provided\n");
@@ -139,11 +159,35 @@ int write_response(struct connection *conn, int status_code,
 
     resp_len = strlen(response);
 
-    ssize_t send_res = send(conn->fd, response, resp_len, 0);
+    // FIXME: In a while loop? while (bytes_sent > 0)
+    ssize_t bytes_sent = send(conn->fd, response, resp_len, 0);
     free(response);
-    if (send_res == -1) {
-        perror("send");
+    if (bytes_sent == -1) {
+        perror("could not send response");
         return -1;
+    }
+
+    return 0;
+}
+
+int determine_request_file(char *path, enum FileType *file_type) {
+    struct stat path_stat;
+    *file_type = UNK;
+    int exist = stat(path, &path_stat);
+    if (exist == 0) {
+        log_info("Path %s exists", path);
+    } else {
+        // FIXME: missing != permissions
+        log_error("Path %s doesn't exist or there was some error validating "
+                  "its existance: %s",
+                  path, strerror(errno));
+        return -1;
+    }
+
+    if (S_ISREG(path_stat.st_mode)) {
+        *file_type = REG;
+    } else if (S_ISDIR(path_stat.st_mode)) {
+        *file_type = DIR;
     }
 
     return 0;
@@ -151,12 +195,37 @@ int write_response(struct connection *conn, int status_code,
 
 int send_response(struct connection *conn) {
     if (conn->url == NULL) {
-        fprintf(stderr, "ERROR: Cannot send response. URL not set.\n");
+        log_error("Cannot send response. URL not set.");
         return -1;
     }
 
-    if (write_response(conn, 500, "Something went wrong.") == -1) {
+    char file_path[MAX_FILE_PATH];
+    // Write serve_directory so it is available here
+    snprintf(file_path, MAX_FILE_PATH, "%s%s", ".", conn->url);
+
+    enum FileType file_type;
+    if (determine_request_file(file_path, &file_type) == -1) {
         return -1;
+    }
+
+    switch (file_type) {
+    case (REG):
+        if (write_response(conn, 200, "File found") == -1) {
+            return -1;
+        }
+        break;
+    case (DIR):
+        if (write_response(conn, 501,
+                           "Requested feature has not been implemented") ==
+            -1) {
+            return -1;
+        }
+        break;
+    default:
+        if (write_response(conn, 404, NULL) == -1) {
+            return -1;
+        }
+        break;
     }
 
     return 0;
@@ -199,8 +268,9 @@ void worker_loop(int recv_sockfd) {
         if (receive_fd(recv_sockfd, &conn_sockfd) < 0) {
             fprintf(stderr,
                     "ERROR: Failed to read file descriptor from socket\n");
-            // FIXME: It might mean that the parent process wasn't successfully
-            // initialized. For now terminate the worker when this happens.
+            // FIXME: It might mean that the parent process wasn't
+            // successfully initialized. For now terminate the worker when
+            // this happens.
             exit(EXIT_FAILURE);
         } else {
             printf("Message received, connection socket fd: %d\n", conn_sockfd);
