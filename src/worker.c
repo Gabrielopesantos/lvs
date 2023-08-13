@@ -328,7 +328,8 @@ void worker_loop(int recv_sockfd) {
             // this happens.
             exit(EXIT_FAILURE);
         } else {
-            printf("Message received, connection socket fd: %d\n", conn_sockfd);
+            log_info("Message received, connection socket fd: %d\n",
+                     conn_sockfd);
             if (handle_connection(conn_sockfd, parser) < 0) {
                 fprintf(stderr, "ERROR: failed to handle connection\n");
             }
@@ -361,6 +362,7 @@ int new_worker(struct worker *w) {
         w->pid = pid;
         w->ipc_sock = ipc_sock_pair[0];
         w->available = 1;
+        w->up = 1;
     } else {
         perror("fork");
     }

@@ -92,6 +92,23 @@ void sigint_handler(int s) {
     exit(EXIT_SUCCESS);
 }
 
+int dispatch_conn(int conn_sockfd) {
+    // Pick a random worker
+    int worker_index = rand() % NUM_WORKERS;
+    int is_available = workers[worker_index].available;
+    while (!is_available) {
+        worker_index = (worker_index + 1) % NUM_WORKERS;
+        is_available = workers[worker_index].available;
+    }
+
+    // Send connection socket to worker
+    if (send_fd(workers[worker_index].ipc_sock, conn_sockfd) == -1) {
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     char *port, *directory;
     switch (argc) {
@@ -157,8 +174,9 @@ int main(int argc, char *argv[]) {
         // log_info("New client connection accepted");
 
         // Send connection socket to worker
-        if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {
-            log_error("Failed to send connection socket: %s", strerror(errno));
+        if (dispatch_conn(conn_sockfd) == -1) {
+            log_error("Failed to dispatch connection socket to a worker: %s",
+                      strerror(errno));
             continue;
         }
     }
@@ -174,7 +192,8 @@ void gracefully_shutdown_worker_processes(int n_workers,
                                           struct worker *workers) {
     // Terminate workers
     for (int i = 0; i < NUM_WORKERS; i++) {
-        if (workers[i].available == 1) {
+        if (workers[i].up == 1) {
+            // TODO: Add a signal hander on worker to free resources
             if (kill(workers[i].pid, SIGINT) == 0) {
                 log_info("Worker with PID %d successfully terminated",
                          workers[i].pid);

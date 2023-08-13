@@ -8,6 +8,7 @@ struct worker {
     pid_t pid;
     int ipc_sock;
     int available;
+    int up;
 };
 
 void spawn_workers(struct worker *workers);
