@@ -153,12 +153,13 @@ int write_response(struct connection *conn, int status_code,
 
     // Allocate 50 bytes to store the content length header
     char buffer[50];
-    char *content_len_header = buffer; // Pointer to buffer
+    char *content_len_header = buffer;
     if (body != NULL) {
         int content_len = strlen(body);
         response_size += content_len;
 
-        sprintf(content_len_header, "Content-Length: %d\r\n", content_len);
+        sprintf(content_len_header, "Content-Length: %d", content_len);
+        // +2 for \r\n
         response_size += strlen(content_len_header) + 2;
     }
     response_size += 2;
@@ -223,6 +224,7 @@ int determine_request_file_type(char *path, enum FileType *file_type) {
 }
 
 int send_response(struct connection *conn) {
+    static const char *empty_additional_header[] = {NULL};
     if (conn->url == NULL) {
         log_error("Cannot send response. URL not set.");
         return -1;
@@ -240,13 +242,15 @@ int send_response(struct connection *conn) {
     case (REG):
         FILE *f = fopen(file_path, "r");
         if (f == NULL) {
-            write_response(conn, 500, NULL, "Could not read file");
+            write_response(conn, 500, empty_additional_header,
+                           "Could not read file");
             return -1;
         }
 
         struct stat f_stat;
         if (stat(file_path, &f_stat) == -1) {
-            write_response(conn, 500, NULL, "Could not get file stats");
+            write_response(conn, 500, empty_additional_header,
+                           "Could not get file stats");
             log_error("Could not get file stats: %s", strerror(errno));
             fclose(f);
             return -1;
@@ -267,14 +271,14 @@ int send_response(struct connection *conn) {
         }
         break;
     case (DIR):
-        if (write_response(conn, 501, NULL,
+        if (write_response(conn, 501, empty_additional_header,
                            "Listing a directory feature has not been "
                            "implemented yet") == -1) {
             return -1;
         }
         break;
     default:
-        if (write_response(conn, 404, NULL, NULL) == -1) {
+        if (write_response(conn, 404, empty_additional_header, NULL) == -1) {
             return -1;
         }
         break;

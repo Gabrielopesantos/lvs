@@ -173,7 +173,7 @@ exit_failure_close:
 void gracefully_shutdown_worker_processes(int n_workers,
                                           struct worker *workers) {
     // Terminate workers
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < NUM_WORKERS; i++) {
         if (workers[i].available == 1) {
             if (kill(workers[i].pid, SIGINT) == 0) {
                 log_info("Worker with PID %d successfully terminated",
