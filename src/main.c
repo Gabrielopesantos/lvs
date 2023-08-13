@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        log_info("New client connection accepted");
+        // log_info("New client connection accepted");
 
         // Send connection socket to worker
         if (send_fd(workers[0].ipc_sock, conn_sockfd) == -1) {

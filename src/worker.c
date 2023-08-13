@@ -123,7 +123,7 @@ int write_response(struct connection *conn, int status_code,
     char *status_line, *response;
     switch (status_code) {
     case 200:
-        status_line = "HTTP/1.1 200 Ok";
+        status_line = "HTTP/1.1 200 OK";
         break;
     case 400:
         status_line = "HTTP/1.1 400 Bad Request";
@@ -141,6 +141,8 @@ int write_response(struct connection *conn, int status_code,
         log_error("Invalid status code provided");
         return -1;
     }
+
+    log_info("Response status line: %s | Path: %s", status_line, conn->url);
 
     response_size += strlen(status_line) + 2;
     // Check if additional headers and body have been provided
@@ -161,7 +163,6 @@ int write_response(struct connection *conn, int status_code,
     }
     response_size += 2;
 
-    log_info("Response size: %d", response_size);
     response = calloc(response_size, sizeof(char));
     if (response == NULL) {
         log_error("Failed to allocate memory for response");
@@ -175,7 +176,6 @@ int write_response(struct connection *conn, int status_code,
         sprintf(response, "%s\r\n", status_line);
 
         for (int i = 0; additional_header[i] != NULL; i++) {
-            log_info("header: %s", additional_header[i]);
             strcat(response, additional_header[i]);
             strcat(response, "\r\n");
         }
@@ -205,7 +205,6 @@ int determine_request_file_type(char *path, enum FileType *file_type) {
     struct stat path_stat;
     int exist = stat(path, &path_stat);
     if (exist == 0) {
-        log_info("Path %s exists", path);
     } else {
         // FIXME: missing != permissions
         log_warn("Path %s doesn't exist or there was some error validating "
@@ -262,7 +261,7 @@ int send_response(struct connection *conn) {
         fclose(f);
 
         static const char *additional_header[] = {"Content-Type: text/simple",
-                                                  NULL};
+                                                  "Connection: close", NULL};
         if (write_response(conn, 200, additional_header, file_content) == -1) {
             return -1;
         }
