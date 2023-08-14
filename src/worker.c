@@ -1,4 +1,5 @@
 #include "worker.h"
+#include "dirent.h"
 #include "http_parser.h"
 #include "ipc.h"
 #include "main.h"
@@ -15,7 +16,7 @@
 #define MAX_FILE_PATH 512
 #define MAX_RESPONSE_SIZE 12288
 
-enum FileType { REG, DIR, UNK };
+enum FileType { REGULAR, DIRECTORY, UNKNOWN };
 
 struct connection {
     int fd;
@@ -209,10 +210,10 @@ int write_response(struct connection *conn, int status_code,
 }
 
 int determine_request_file_type(char *path, enum FileType *file_type) {
-    *file_type = UNK;
+    *file_type = UNKNOWN;
 
-    struct stat path_stat;
-    int exist = stat(path, &path_stat);
+    struct stat file_stat;
+    int exist = stat(path, &file_stat);
     if (exist == 0) {
     } else {
         // FIXME: missing != permissions
@@ -222,43 +223,103 @@ int determine_request_file_type(char *path, enum FileType *file_type) {
         return -1;
     }
 
-    if (S_ISREG(path_stat.st_mode)) {
-        *file_type = REG;
-    } else if (S_ISDIR(path_stat.st_mode)) {
-        *file_type = DIR;
+    if (S_ISREG(file_stat.st_mode)) {
+        *file_type = REGULAR;
+    } else if (S_ISDIR(file_stat.st_mode)) {
+        *file_type = DIRECTORY;
     }
 
     return 0;
 }
 
+int generate_directory_listing_html(const char *dir_path, char *output_buffer,
+                                    size_t buffer_size) {
+    DIR *d;
+    struct dirent *dir;
+    struct stat st;
+    size_t written = 0;
+
+    d = opendir(dir_path);
+    if (d == NULL) {
+        log_error("Unable to open directory '%s': %s", dir_path,
+                  strerror(errno));
+        return -1;
+    }
+
+    written += snprintf(output_buffer, buffer_size,
+                        "<!DOCTYPE HTML>\n"
+                        "<html lang=\"en\">\n"
+                        "<head>\n"
+                        "<meta charset=\"utf-8\">\n"
+                        "<title>Directory listing for %s</title>\n"
+                        "</head>\n"
+                        "<body>\n"
+                        "<h1>Directory listing for %s</h1>\n"
+                        "<hr>\n"
+                        "<ul>\n",
+                        dir_path, dir_path);
+
+    while ((dir = readdir(d)) != NULL) {
+        if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
+            continue; // skip "." and ".."
+
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, dir->d_name);
+        stat(full_path, &st);
+
+        // Append to the output buffer
+        if (S_ISDIR(st.st_mode)) {
+            // It's a directory
+            written += snprintf(output_buffer + written, buffer_size - written,
+                                "<li><a href=\"%s/\">%s/</a></li>\n",
+                                dir->d_name, dir->d_name);
+        } else if (S_ISREG(st.st_mode)) {
+            // It's a file
+            written += snprintf(output_buffer + written, buffer_size - written,
+                                "<li><a href=\"%s\">%s</a></li>\n", dir->d_name,
+                                dir->d_name);
+        } else {
+            // Ignore other file types
+            continue;
+        }
+    }
+    closedir(d);
+
+    written += snprintf(output_buffer + written, buffer_size - written,
+                        "</ul>\n"
+                        "<hr>\n"
+                        "</body>\n"
+                        "</html>\n");
+
+    return 0;
+}
+
 int send_response(struct connection *conn) {
-    static const char *empty_additional_header[] = {NULL};
     if (conn->url == NULL) {
         log_error("Cannot send response. URL not set.");
         return -1;
     }
 
-    char file_path[MAX_FILE_PATH];
+    char url_path[MAX_FILE_PATH];
     // FIXME: Wire serve_directory so it is available here
-    snprintf(file_path, MAX_FILE_PATH, "%s%s", ".", conn->url);
+    snprintf(url_path, MAX_FILE_PATH, "%s%s", ".", conn->url);
     enum FileType file_type;
-    if (determine_request_file_type(file_path, &file_type) == -1) {
+    if (determine_request_file_type(url_path, &file_type) == -1) {
         return -1;
     }
 
+    static const char *empty_header[] = {NULL};
     switch (file_type) {
-    case (REG):
-        FILE *f = fopen(file_path, "r");
+    case (REGULAR): {
+        FILE *f = fopen(url_path, "r");
         if (f == NULL) {
-            write_response(conn, 500, empty_additional_header,
-                           "Could not read file");
+            write_response(conn, 500, empty_header, "Could not read file");
             return -1;
         }
 
         struct stat f_stat;
-        if (stat(file_path, &f_stat) == -1) {
-            write_response(conn, 500, empty_additional_header,
-                           "Could not get file stats");
+        if (stat(url_path, &f_stat) == -1) {
+            write_response(conn, 500, empty_header, "Could not get file stats");
             log_error("Could not get file stats: %s", strerror(errno));
             fclose(f);
             return -1;
@@ -268,25 +329,31 @@ int send_response(struct connection *conn) {
 
         // FIXME: Handle error
         char *file_content = calloc(file_size + 1, sizeof(char));
-        ssize_t bytes_read;
-        bytes_read = fread(file_content, sizeof(char), file_size, f);
+        ssize_t bytes_read = fread(file_content, sizeof(char), file_size, f);
         fclose(f);
 
-        static const char *additional_header[] = {"Content-Type: text/simple",
-                                                  "Connection: close", NULL};
-        if (write_response(conn, 200, additional_header, file_content) == -1) {
+        const char *header[] = {"Content-Type: text/simple",
+                                "Connection: close", NULL};
+        if (write_response(conn, 200, header, file_content) == -1) {
             return -1;
         }
         break;
-    case (DIR):
-        if (write_response(conn, 501, empty_additional_header,
-                           "Listing a directory feature has not been "
-                           "implemented yet") == -1) {
+    }
+    case (DIRECTORY): {
+        char body_buffer[8192];
+        if (generate_directory_listing_html(url_path, body_buffer,
+                                            sizeof(body_buffer)) == -1) {
+            return -1;
+        }
+        const char *header[] = {"Content-Type: text/html", "Connection: close",
+                                NULL};
+        if (write_response(conn, 200, header, body_buffer) == -1) {
             return -1;
         }
         break;
+    }
     default:
-        if (write_response(conn, 404, empty_additional_header, NULL) == -1) {
+        if (write_response(conn, 404, empty_header, NULL) == -1) {
             return -1;
         }
         break;
@@ -332,8 +399,8 @@ void worker_loop(int recv_sockfd) {
             fprintf(stderr,
                     "ERROR: Failed to read file descriptor from socket\n");
             // FIXME: It might mean that the parent process wasn't
-            // successfully initialized. For now terminate the worker when
-            // this happens.
+            // successfully initialized. For now terminate the worker
+            // when this happens.
             exit(EXIT_FAILURE);
         } else {
             log_info("Message received, connection socket fd: %d\n",
