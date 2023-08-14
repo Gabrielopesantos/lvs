@@ -5,7 +5,7 @@
 #include <stdio.h>
 
 #define MAX_BUFFER_SIZE 4096
-#define NUM_WORKERS 5
+#define NUM_WORKERS 1
 
 // FIXME: Move functions way from here
 

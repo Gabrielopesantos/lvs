@@ -78,7 +78,15 @@ int on_status_cb(http_parser *parser, const char *at, size_t len) {
 //
 int on_url_cb(http_parser *parser, const char *url, size_t url_len) {
     struct connection *conn = parser->data;
-    memcpy(conn->url, url, url_len);
+    // Parse URL, remove any query parameters (?key=val) and/or fragment
+    // identifiers (#fragment)
+    for (int i = 0; i < url_len; i++) {
+        if (url[i] == '?' || url[i] == '#') {
+            url_len = i;
+            break;
+        }
+    }
+    strncpy(conn->url, url, url_len);
 
     return 0;
 }
@@ -170,7 +178,7 @@ int write_response(struct connection *conn, int status_code,
         return -1;
     }
 
-    if (body == NULL && additional_header == NULL) {
+    if (body == NULL && additional_header[0] == NULL) {
         sprintf(response, "%s\r\n", status_line);
     } else {
         // char *connection_close_header = "Connection: close\r\n";
