@@ -27,4 +27,4 @@ make run
 
 All code except `src/http_parser.c` and `src/http_parser.h`: MIT
 
-The http_parser is under copyright of Joyent: [http_parser](https://github.com/nodejs/http-parser)
+The http_parser is under copyright of nodejs: [http_parser](https://github.com/nodejs/http-parser)

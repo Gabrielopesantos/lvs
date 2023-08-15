@@ -32,8 +32,9 @@ struct connection {
 struct connection *new_connection(int conn_fd) {
     struct connection *conn = malloc(sizeof(struct connection));
     if (conn == NULL) {
-        fprintf(stderr, "ERROR: Failed to allocate memory for connection\n");
-        exit(EXIT_FAILURE);
+        log_error("Failed to allocate memory for connection: %s",
+                  strerror(errno));
+        exit(EXIT_FAILURE); // FIXME:
     }
 
     conn->completed = 0;
@@ -43,8 +44,8 @@ struct connection *new_connection(int conn_fd) {
     conn->buf = calloc(MAX_BUFFER_SIZE, sizeof(char));
     if (conn->buf == NULL) {
         free(conn);
-        fprintf(stderr, "ERROR: Failed to allocate memory for buffer\n");
-        exit(EXIT_FAILURE);
+        log_error("Failed to allocate memory for buffer: %s", strerror(errno));
+        exit(EXIT_FAILURE); // FIXME:
     }
     conn->buf_size = MAX_BUFFER_SIZE;
 
@@ -52,8 +53,8 @@ struct connection *new_connection(int conn_fd) {
     if (conn->url == NULL) {
         free(conn);
         free(conn->buf);
-        fprintf(stderr, "ERROR: Failed to allocate memory for url\n");
-        exit(EXIT_FAILURE);
+        log_error("Failed to allocate memory for url: %s", strerror(errno));
+        exit(EXIT_FAILURE); // FIXME
     }
 
     return conn;
@@ -65,18 +66,7 @@ void free_connection(struct connection *conn) {
     free(conn);
 }
 
-// FIXME: What is this?
 // Callback when a URL is found in the request
-int on_status_cb(http_parser *parser, const char *at, size_t len) {
-    // struct connection *conn = parser->data;
-    printf("Status found: %.*s\n", (int)len, at); // FIXME: remove
-    // memcpy(conn->url, url, url_len);
-
-    return 0;
-}
-
-// Callback when a URL is found in the request
-//
 int on_url_cb(http_parser *parser, const char *url, size_t url_len) {
     struct connection *conn = parser->data;
     // Parse URL, remove any query parameters (?key=val) and/or fragment
@@ -107,20 +97,17 @@ int read_request(http_parser *parser, struct connection *conn) {
         perror("recv");
         return -1;
     }
-    // fprintf(stdout, "Received the message\n'%s'\nwith size %zd\n", conn->buf,
-    //         msg_size);
 
     // FIXME: Think where to put these settings
     http_parser_settings settings = {0};
     // memset(&settings, 0, sizeof(settings));
-    settings.on_status = on_status_cb;
     settings.on_url = on_url_cb;
     settings.on_message_complete = on_message_complete_cb;
 
     size_t parsed = http_parser_execute(parser, &settings, conn->buf, msg_size);
     if (parsed != msg_size) {
-        printf("Failed to parse request: %s\n",
-               http_errno_description(HTTP_PARSER_ERRNO(parser)));
+        log_error("Failed to parse request: %s\n",
+                  http_errno_description(HTTP_PARSER_ERRNO(parser)));
     }
 
     return 0;
@@ -202,7 +189,7 @@ int write_response(struct connection *conn, int status_code,
     ssize_t bytes_sent = send(conn->fd, response, response_size, 0);
     free(response);
     if (bytes_sent == -1) {
-        perror("could not send response");
+        log_error("Could not send response: %s", strerror(errno));
         return -1;
     }
 
@@ -396,17 +383,17 @@ void worker_loop(int recv_sockfd) {
     while (1) {
         int conn_sockfd;
         if (receive_fd(recv_sockfd, &conn_sockfd) < 0) {
-            fprintf(stderr,
-                    "ERROR: Failed to read file descriptor from socket\n");
+            log_error("Failed to read file descriptor from socket: %s",
+                      strerror(errno));
             // FIXME: It might mean that the parent process wasn't
             // successfully initialized. For now terminate the worker
             // when this happens.
-            exit(EXIT_FAILURE);
+            exit(EXIT_FAILURE); // FIXME
         } else {
-            log_info("Message received, connection socket fd: %d\n",
-                     conn_sockfd);
+            // log_info("Message received, connection socket fd: %d\n",
+            //          conn_sockfd);
             if (handle_connection(conn_sockfd, parser) < 0) {
-                fprintf(stderr, "ERROR: failed to handle connection\n");
+                log_error("Failed to handle connection\n");
             }
         }
         // break; // FIXME: Remove this break
@@ -431,7 +418,7 @@ int new_worker(struct worker *w) {
         close(ipc_sock_pair[0]);
         worker_loop(ipc_sock_pair[1]);
     } else if (pid > 0) {
-        printf("Worker process spawned. PID: %d\n", pid);
+        log_info("Worker process with id %d spawned", pid);
         close(ipc_sock_pair[1]);
         // Parent process
         w->pid = pid;
@@ -439,7 +426,7 @@ int new_worker(struct worker *w) {
         w->available = 1;
         w->up = 1;
     } else {
-        perror("fork");
+        log_error("Could not fork worker process: %s", strerror(errno));
     }
 
     return 0;
@@ -449,7 +436,7 @@ void spawn_workers(struct worker *workers) {
     for (int i = 0; i < NUM_WORKERS; i++) {
         if (new_worker(&workers[i]) == -1) {
             // NOTE: Let's not think about retries for now
-            fprintf(stderr, "ERROR: Failed to spawn worker with id %d\n", i);
+            log_warn("Failed to spawn worker with id %d", i);
         }
     }
 }

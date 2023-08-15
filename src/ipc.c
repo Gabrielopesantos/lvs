@@ -1,6 +1,9 @@
+#include "main.h"
+#include <errno.h>
 #include <memory.h>
 #include <netdb.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 
 int send_fd(int socket, int fd) {
@@ -43,7 +46,7 @@ int receive_fd(int socket, int *fd) {
     msg.msg_controllen = sizeof(buf);
 
     if (recvmsg(socket, &msg, 0) < 0) {
-        perror("recvmsg");
+        log_error("Failed to receive message: %s", strerror(errno));
         return -1;
     }
 
