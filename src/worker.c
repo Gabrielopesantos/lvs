@@ -4,6 +4,7 @@
 #include "ipc.h"
 #include "main.h"
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -281,6 +282,14 @@ int generate_directory_listing_html(const char *dir_path, char *output_buffer,
     return 0;
 }
 
+int notify_parent_connection_closed(int parent_sockfd) {
+    static const char *msg = "CONN_CLOSE";
+    if (send(parent_sockfd, msg, strlen(msg), 0) < 0) {
+        log_error("Failed to send message to parent: %s", strerror(errno));
+    }
+    return 0;
+}
+
 int send_response(struct connection *conn) {
     if (conn->url == NULL) {
         log_error("Cannot send response. URL not set.");
@@ -369,11 +378,11 @@ close_connection:
     free_connection(conn);
     shutdown(conn_sockfd, SHUT_RDWR);
     close(conn_sockfd);
+    // Notify parent
     return 0;
 }
 
 void worker_loop(int recv_sockfd) {
-    // printf("recv socket fd %d\n", recv_sockfd);
 
     // NOTE: What if this was moved to the struct?
     // FIXME: Handle malloc failure
@@ -395,6 +404,7 @@ void worker_loop(int recv_sockfd) {
             if (handle_connection(conn_sockfd, parser) < 0) {
                 log_error("Failed to handle connection\n");
             }
+            notify_parent_connection_closed(recv_sockfd);
         }
         // break; // FIXME: Remove this break
     }

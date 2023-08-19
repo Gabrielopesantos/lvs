@@ -1,5 +1,6 @@
 #include "main.h"
 #include "ipc.h"
+#include "thread_pool.h"
 #include "worker.h"
 #include <errno.h>
 #include <memory.h>
@@ -94,6 +95,7 @@ void sigint_handler(int s) {
 
 int dispatch_conn(int conn_sockfd) {
     // Pick a random worker
+    // FIXME: Can get in this while loop
     int worker_index = rand() % NUM_WORKERS;
     int is_available = workers[worker_index].available;
     while (!is_available) {
@@ -106,7 +108,20 @@ int dispatch_conn(int conn_sockfd) {
         return -1;
     }
 
-    return 0;
+    return worker_index;
+}
+
+void expect_worker_response(void *worker, int conn_sockfd) {
+    struct worker *worker_ptr = (struct worker *)worker;
+    char msg_buf[11];
+    read(worker_ptr->ipc_sock, &msg_buf, sizeof(msg_buf));
+
+    // FIXME: If worker fails to answer back, we consider it dead
+    if (strcmp(msg_buf, "CONN_CLOSE") == 0) {
+        // This var should be locked
+        worker_ptr->available = 1;
+        close(conn_sockfd);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -158,6 +173,9 @@ int main(int argc, char *argv[]) {
 
     log_info("Server listening for connections...");
 
+    threadpool_t threadpool;
+    init_threadpool(&threadpool, NUM_WORKERS);
+
     struct sockaddr_in client_addr;
     socklen_t client_len;
     int conn_sockfd;
@@ -174,15 +192,24 @@ int main(int argc, char *argv[]) {
         // log_info("New client connection accepted");
 
         // Send connection socket to worker
-        if (dispatch_conn(conn_sockfd) == -1) {
+        int worker_index;
+        if ((worker_index = dispatch_conn(conn_sockfd)) == -1) {
             log_error("Failed to dispatch connection socket to a worker: %s",
                       strerror(errno));
             continue;
         }
+
+        // Mark worker as unavailable
+        workers[worker_index].available = 0;
+
+        // Expect a response from worker
+        submit_job(&threadpool, expect_worker_response, &workers[worker_index],
+                   conn_sockfd);
     }
 
     shutdown(inet_sockfd, SHUT_RDWR);
     close(inet_sockfd);
+    shutdown_threadpool(&threadpool);
 exit_failure_close:
     gracefully_shutdown_worker_processes(NUM_WORKERS, workers);
     exit(EXIT_FAILURE);
